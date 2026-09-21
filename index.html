@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Валера: Северодвинск 2003</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.js", "three/addons/": "./js/vendor/" } }
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="vignette"></div>
+  <div id="topright">
+    <div id="clock"><span id="time">08:00</span><span id="date"></span><span id="weather"></span></div>
+    <div id="money">₽ 0</div>
+    <div id="stars"></div>
+    <div id="weaponbox"><div id="wname">Кулаки</div><div id="wammo"></div></div>
+  </div>
+  <div id="objective"><div class="lbl">ЗАДАНИЕ</div><div id="objtext"></div></div>
+  <div id="notifications"></div>
+  <div id="minimap-wrap">
+    <div id="area"><div id="street"></div><div id="district"></div></div>
+    <div id="map-frame"><canvas id="minimap" width="260" height="260"></canvas><div id="compass">С</div></div>
+    <div id="bars"><div id="hp"><i></i></div><div id="ar"><i></i></div></div>
+    <div id="stam"><i></i></div>
+  </div>
+  <div id="speedo" class="hidden"><span id="spd">0</span><small> км/ч</small><div id="carhp"><i></i></div></div>
+  <div id="vehname"></div>
+  <div id="radioname"></div>
+  <div id="crosshair" class="hidden"></div>
+  <div id="hitmarker"></div>
+  <div id="prompt" class="hidden"><b>E</b><span></span></div>
+  <div id="subtitle"></div>
+  <div id="floatmsg"></div>
+  <div id="bubbles"></div>
+  <div id="arrest" class="hidden"><i></i><span>ЗАДЕРЖАНИЕ</span></div>
+  <div id="banner"><div class="big"></div><div class="sub"></div></div>
+  <div id="wheel" class="hidden"><div class="ring"></div><div id="wheelname"></div></div>
+  <div id="fps"></div>
+</div>
+
+<div id="letterbox" class="hidden"><div class="top"></div><div class="bot"></div><div id="cstitle"></div><div id="csskip">ПРОБЕЛ — пропустить</div></div>
+<div id="wasted" class="hidden"><div class="big"></div><div class="sub"></div></div>
+<div id="fade"></div>
+
+<div id="shop" class="hidden">
+  <div class="panel">
+    <h2 id="shoptitle"></h2>
+    <div id="shopmoney"></div>
+    <div id="shopitems"></div>
+    <div class="hint">Клик — купить · Esc / E — выйти</div>
+  </div>
+</div>
+
+<div id="fullmap" class="hidden"><canvas id="bigmap"></canvas><div id="maplegend"></div><div class="hint">M — закрыть</div></div>
+
+<div id="pause" class="hidden">
+  <div class="panel">
+    <h2>ПАУЗА</h2>
+    <button id="btn-resume">Продолжить</button>
+    <button id="btn-save">Сохранить игру</button>
+    <button id="btn-settings">Настройки</button>
+    <button id="btn-controls">Управление</button>
+    <button id="btn-quit">В главное меню</button>
+  </div>
+</div>
+
+<div id="settings" class="hidden">
+  <div class="panel">
+    <h2>НАСТРОЙКИ</h2>
+    <label>Качество графики
+      <select id="set-quality"><option value="low">Низкое (слабые ПК)</option><option value="medium">Среднее</option><option value="high" selected>Высокое</option></select></label>
+    <label>Поле зрения <input id="set-fov" type="range" min="55" max="95" value="70"></label>
+    <label>Чувствительность мыши <input id="set-sens" type="range" min="20" max="250" value="100"></label>
+    <label>Громкость <input id="set-vol" type="range" min="0" max="100" value="80"></label>
+    <label>Плотность толпы и трафика <input id="set-density" type="range" min="30" max="150" value="100"></label>
+    <label><input id="set-fps" type="checkbox"> Показывать FPS</label>
+    <button id="btn-settings-back">Назад</button>
+  </div>
+</div>
+
+<div id="controls" class="hidden">
+  <div class="panel wide">
+    <h2>УПРАВЛЕНИЕ</h2>
+    <div class="grid">
+      <div><b>W A S D</b> — ходьба</div><div><b>Shift</b> — бег</div>
+      <div><b>Пробел</b> — прыжок / ручник</div><div><b>C</b> — присесть</div>
+      <div><b>Q</b> — укрытие (у стены/забора)</div><div><b>Мышь</b> — камера</div>
+      <div><b>ЛКМ</b> — удар / выстрел</div><div><b>ПКМ</b> — прицелиться</div>
+      <div><b>R</b> — перезарядка / радио в авто</div><div><b>1–8</b> — оружие, <b>Tab</b> — колесо оружия</div>
+      <div><b>F</b> — сесть в авто / на велосипед (угнать)</div><div><b>E</b> — магазин / ограбить / выйти из авто</div>
+      <div><b>H</b> — клаксон / звонок</div><div><b>G</b> — мигалка (милицейская машина)</div>
+      <div><b>M</b> — большая карта</div><div><b>Esc</b> — пауза</div>
+    </div>
+    <button id="btn-controls-back">Назад</button>
+  </div>
+</div>
+
+<div id="title">
+  <div class="tbg"></div>
+  <div class="tcontent">
+    <div class="tsub">открытый мир · Северодвинск · 2003</div>
+    <h1>ВАЛЕРА</h1>
+    <div id="tloading"><div class="bar"><i></i></div><span>Загрузка города…</span></div>
+    <div id="tmenu" class="hidden">
+      <button id="btn-new">Новая игра</button>
+      <button id="btn-continue" class="hidden">Продолжить</button>
+      <button id="btn-t-controls">Управление</button>
+      <button id="btn-t-settings">Настройки</button>
+    </div>
+    <div class="tfoot">Захватывай районы. Угоняй тачки. Не попадайся милиции.</div>
+  </div>
+</div>
+<div id="errbox" class="hidden"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
