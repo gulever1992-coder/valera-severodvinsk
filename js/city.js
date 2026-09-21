@@ -198,22 +198,30 @@ const TYPES = [
 ];
 
 function boxBuilding(o) {
-  // o: cx,cz,L,W,fl,floorH,rot,color,roof
+  // o: cx,cz,L,W,fl,floorH,rot,color,roof. Стены разбиты по этажам: нижний этаж темнее (грязь, тень), верх светлее
   const H = o.fl * (o.floorH || 3);
-  const g = new THREE.BoxGeometry(o.L, H, o.W);
-  const uv = g.attributes.uv;
+  const g = new THREE.BoxGeometry(o.L, H, o.W, 1, o.fl, 1);
+  const uv = g.attributes.uv, pos = g.attributes.position, n = pos.count;
   const bays = Math.max(1, Math.round(o.L / 3.3)), baysW = Math.max(1, Math.round(o.W / 3.3));
   const off = Math.floor(Math.random() * 40) + 1;
-  const rows = o.floorH === 4 || o.floorH === 2.8 ? o.fl : o.fl;
-  for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) {
-    const i = f * 4 + v, u = uv.getX(i), w = uv.getY(i);
-    if (f === 2 || f === 3) { uv.setXY(i, 0.5, 0.06); continue; }
-    const rep = f < 2 ? baysW : bays;
-    uv.setXY(i, u * rep + off, w * rows);
-  }
+  const side = 2 * (o.fl + 1), cap = 4;
+  const order = [side, side, cap, cap, side, side];
   const c = new THREE.Color(o.color), rc = new THREE.Color(o.roof || '#5a5a5a');
-  const arr = new Float32Array(24 * 3);
-  for (let i = 0; i < 24; i++) { const cc = i >= 8 && i < 12 ? rc : c; arr[i * 3] = cc.r; arr[i * 3 + 1] = cc.g; arr[i * 3 + 2] = cc.b; }
+  const arr = new Float32Array(n * 3);
+  let vi = 0;
+  for (let f = 0; f < 6; f++) {
+    for (let k = 0; k < order[f]; k++, vi++) {
+      const u = uv.getX(vi), w = uv.getY(vi);
+      const yn = (pos.getY(vi) + H / 2) / H;
+      if (f === 2 || f === 3) { uv.setXY(vi, 0.5, 0.06); const cc = f === 2 ? rc : c; arr[vi * 3] = cc.r; arr[vi * 3 + 1] = cc.g; arr[vi * 3 + 2] = cc.b; continue; }
+      const rep = f < 2 ? baysW : bays;
+      uv.setXY(vi, u * rep + off, w * o.fl);
+      const rowF = yn <= 0.001 ? 0.55 : yn < 1.5 / o.fl ? 0.9 : 1.0;
+      const topF = yn > 0.999 ? 1.06 : 1.0;
+      const m = rowF * topF;
+      arr[vi * 3] = c.r * m; arr[vi * 3 + 1] = c.g * m; arr[vi * 3 + 2] = c.b * m;
+    }
+  }
   g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
   g.translate(0, H / 2, 0);
   g.rotateY(-o.rot);
@@ -323,6 +331,25 @@ function buildRoadMeshes(root) {
       swGeos.push(stripGeometry(r.pts, w0, w1, 0.05, (a, b) => [a[0] / 3.2, a[1] / 3.2, b[0] / 3.2, b[1] / 3.2]));
     }
   });
+  // пешеходные переходы на перекрёстках
+  const zeb = [];
+  for (const nd of City.graph.nodes) {
+    if (!nd.junction) continue;
+    for (const e of nd.out) {
+      if (e.road.lvl < 2 || e.len < 24) continue;
+      const along = 7, w = e.w;
+      const cx = nd.x + e.dx * along, cz = nd.z + e.dz * along;
+      const n = Math.floor(w / 1.1);
+      for (let k = 0; k < n; k++) {
+        const off = (k - (n - 1) / 2) * 1.1;
+        const g = new THREE.PlaneGeometry(0.55, 3.2).rotateX(-Math.PI / 2);
+        g.rotateY(Math.atan2(e.dx, e.dz));
+        g.translate(cx + -e.dz * off, 0.19, cz + e.dx * off);
+        zeb.push(g.toNonIndexed());
+      }
+    }
+  }
+  if (zeb.length) { const zm = new THREE.Mesh(mergeGeometries(zeb.map((g) => { g.deleteAttribute('uv'); g.deleteAttribute('normal'); return g; })), new THREE.MeshBasicMaterial({ color: 0xd8d8d0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })); root.add(zm); }
   // тротуарное кольцо и внутренний остров
   const ringPts = City.roads.find((r) => r.ring).pts;
   swGeos.push(stripGeometry(ringPts, RING.width / 2, RING.width / 2 + 3, 0.05, (a, b) => [a[0] / 3.2, a[1] / 3.2, b[0] / 3.2, b[1] / 3.2]));
@@ -532,7 +559,15 @@ function buildTrees(root) {
   const trunkG = new THREE.CylinderGeometry(0.13, 0.2, 6.0, 5).translate(0, 3, 0);
   const bt = mkInst(trunkG, new THREE.MeshLambertMaterial({ color: 0xe6e2d6 }), birch, (t, d) => { d.position.set(t.x, 0, t.z); d.scale.set(t.s, t.s, t.s); d.rotation.set(0, 0, 0); });
   void bt;
-  const crownG = new THREE.IcosahedronGeometry(1, 0).scale(2, 2.8, 2).translate(0, 6.6, 0);
+  const crownG = (() => {
+    const blobs = [];
+    for (const [x, y, z, r] of [[0, 6.4, 0, 1.0], [0.9, 5.6, 0.3, 0.7], [-0.8, 5.9, -0.4, 0.75], [0.1, 7.6, 0.2, 0.7], [0.2, 5.5, -0.9, 0.6]]) {
+      const g = new THREE.IcosahedronGeometry(r * 1.7, 1); const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) { const k = 1 + (Math.sin(i * 12.9898 + r * 78.2) * 0.5) * 0.18; p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 1.25, p.getZ(i) * k); }
+      g.translate(x, y, z); blobs.push(g.toNonIndexed());
+    }
+    return mergeGeometries(blobs);
+  })();
   const cm = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const bc = mkInst(crownG, cm, birch, (t, d) => { d.position.set(t.x, 0, t.z); d.scale.set(t.s, t.s, t.s); d.rotation.set(0, t.x * 3.7, 0); });
   birch.forEach((t, i) => bc.setColorAt(i, new THREE.Color().setHSL(rand(0.2, 0.26), rand(0.45, 0.6), rand(0.3, 0.42))));

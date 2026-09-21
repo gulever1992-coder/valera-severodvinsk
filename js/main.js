@@ -15,6 +15,7 @@ import { Events } from './events.js';
 import { Story } from './story.js';
 import { Player } from './player.js';
 import { UI } from './ui.js';
+import { Post } from './post.js';
 import { WEAPONS } from './data.js';
 import { clamp, dist2, dist } from './util.js';
 
@@ -55,6 +56,7 @@ function applySettings() {
   Veh.wantTraffic = Math.round(30 * s.density); Veh.wantParked = Math.round(26 * s.density); Peds.wantCivs = Math.round(26 * s.density);
   $('fps').style.display = s.fps ? 'block' : 'none';
   camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+  Post.setQuality(s.quality); Post.resize(window.innerWidth, window.innerHeight);
 }
 function bindSettings() {
   const s = G.settings;
@@ -92,7 +94,7 @@ function bindInput() {
   document.addEventListener('pointerlockchange', () => {
     if (!document.pointerLockElement && G.started && !UI.shopOpen && !UI.mapOpen && !G.paused && !G.freeze && !G.dead) pauseGame();
   });
-  window.addEventListener('resize', () => { renderer.setSize(window.innerWidth, window.innerHeight, false); camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); });
+  window.addEventListener('resize', () => { renderer.setSize(window.innerWidth, window.innerHeight, false); camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); Post.resize(window.innerWidth, window.innerHeight); });
 }
 G.requestLock = () => { const c = $('game'); try { const p = c.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* */ } };
 
@@ -177,18 +179,18 @@ function stepFrame(dt) {
     if (G.env) { G.env.update(dt, camera, camera.position); }
     Player.updateCamera(dt);
     simulate(dt, true);
-    renderer.render(scene, camera);
+    Post.render(dt);
     G.input.pressed = {}; G.input.pressedBtn = {};
     return;
   }
-  if (G.paused) { renderer.render(scene, camera); G.input.pressed = {}; G.input.pressedBtn = {}; return; }
+  if (G.paused) { Post.render(dt); G.input.pressed = {}; G.input.pressedBtn = {}; return; }
   dt *= G.timeScale || 1;
   G.time += dt;
   UI.update(dt);
   Story.update(dt);
   Player.update(dt);
   simulate(dt, false);
-  renderer.render(scene, camera);
+  Post.render(dt);
   if (G.settings.fps) { fpsAcc += rawDt; fpsN++; if (fpsAcc > 0.5) { $('fps').textContent = Math.round(fpsN / fpsAcc) + ' FPS'; fpsAcc = 0; fpsN = 0; } }
   G.input.pressed = {}; G.input.pressedBtn = {};
 }
@@ -223,6 +225,15 @@ function simulate(dt, title) {
   if (City.lampGlow && G.env) City.lampGlow.material.size = 14;
 }
 
+// карта окружения для отражений на кузовах машин
+function buildEnvMap() {
+  const pm = new THREE.PMREMGenerator(renderer), es = new THREE.Scene();
+  const mat = new THREE.ShaderMaterial({ side: THREE.BackSide, vertexShader: 'varying vec3 p; void main(){ p = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+    fragmentShader: 'varying vec3 p; void main(){ vec3 d = normalize(p); float h = d.y; vec3 sky = mix(vec3(0.75,0.85,0.95), vec3(0.3,0.5,0.85), clamp(h,0.0,1.0)); vec3 gr = vec3(0.26,0.25,0.22); vec3 c = h > 0.0 ? sky : gr; c += vec3(1.4,1.2,0.9) * pow(max(dot(d, normalize(vec3(0.4,0.6,0.3))), 0.0), 40.0); gl_FragColor = vec4(c, 1.0); }' });
+  es.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), mat));
+  G.envMap = pm.fromScene(es, 0.02).texture; pm.dispose();
+}
+
 // ---------- загрузка ----------
 async function boot() {
   try {
@@ -245,6 +256,7 @@ async function boot() {
     await tick();
     progress(60, 'Небо и погода…');
     createEnv(scene, camera, renderer);
+    buildEnvMap(); Post.init(renderer, scene, camera);
     FX.init(scene);
     await tick();
     progress(75, 'Люди, машины, банды…');

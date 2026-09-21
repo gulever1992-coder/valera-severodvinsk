@@ -170,13 +170,15 @@ export function createEnv(scene, camera, renderer) {
     hor = grayify(hor, clamp(env.cloud * 0.7 + env.fog * 0.5, 0, 0.92), 1 - gray * 0.4);
     if (env.fog > 0.3) { hor = mix3(hor, mix3([0.33, 0.35, 0.38], [0.72, 0.74, 0.76], day), env.fog * 0.8); top = mix3(top, hor, env.fog * 0.6); }
     const u = skyMat.uniforms;
-    u.top.value.set(...top); u.hor.value.set(...hor);
+    const lin = G.post && G.post.on; const K = (c) => (lin ? c.map((x) => Math.pow(x, 2.2)) : c);
+    u.top.value.set(...K(top)); u.hor.value.set(...K(hor));
     u.sunDir.value.copy(env.sunDir);
     u.moonDir.value.copy(env.sunDir).multiplyScalar(-1);
     u.tw.value = twg * (1 - env.cloud * 0.6);
     u.night.value = env.night * (1 - env.cloud * 0.85);
     u.sunCol.value.set(1, lerp(0.6, 0.95, day), lerp(0.3, 0.8, day)).multiplyScalar((1 - env.cloud * 0.9) * (sinA > -0.05 ? 1 : 0));
-    scene.fog.color.setRGB(hor[0], hor[1], hor[2], THREE.LinearSRGBColorSpace);
+    { const fh = K(hor); scene.fog.color.setRGB(fh[0], fh[1], fh[2], THREE.LinearSRGBColorSpace); }
+    if (G.vehMat) G.vehMat.envMapIntensity = lerp(0.12, 1.0, day) * (1 - gray * 0.4);
     scene.fog.density = 0.0011 + env.fog * 0.0085 + env.rain * 0.0006 + env.snow * 0.0015;
     // свет
     const sunUp = Math.max(0, env.sunDir.y);
@@ -184,7 +186,7 @@ export function createEnv(scene, camera, renderer) {
     const dirI = sinA > -0.03 ? (0.4 + 2.0 * clamp(sunUp * 2.2, 0, 1)) * (1 - env.cloud * 0.65) * day + 0.0 : 0.35 * (1 - env.cloud * 0.5);
     env.sun.intensity = dirI * (1 - gray * 0.5) + env.lightning * 3;
     env.sun.color.setRGB(lerp(1.0, 0.7, 1 - day), lerp(0.85 + sunUp * 0.1, 0.78, 1 - day), lerp(0.62 + sunUp * 0.3, 1.0, 1 - day));
-    env.hemi.intensity = lerp(0.28, 0.95, day) * (1 - gray * 0.35) + env.lightning * 1.0;
+    env.hemi.intensity = lerp(0.45, 0.95, day) * (1 - gray * 0.35) + env.lightning * 1.0;
     env.hemi.color.setRGB(...mix3([0.35, 0.42, 0.62], [0.72, 0.84, 1.0], day));
     env.hemi.groundColor.setRGB(...mix3([0.1, 0.1, 0.12], [0.42, 0.4, 0.34], day));
     renderer.toneMappingExposure = lerp(1.15, 0.95, day);

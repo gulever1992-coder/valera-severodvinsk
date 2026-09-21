@@ -85,77 +85,164 @@ export function pedLook(type) {
   }
 }
 
+// ---------- скелетные персонажи (скруглённые формы, один SkinnedMesh на человека) ----------
+const BONE = { hips: 0, spine: 1, head: 2, shL: 3, elL: 4, shR: 5, elR: 6, thL: 7, knL: 8, thR: 9, knR: 10 };
+function plainUV(g) {
+  const n = g.attributes.position.count, uv = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) { uv[i * 2] = 0.1 / N; uv[i * 2 + 1] = 1 - 0.1 / N; }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+function paint(g, color) {
+  const c = C(color), n = g.attributes.position.count, arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+}
+// prim: геометрия → масштаб → поворот → сдвиг → цвет
+function prim(geo, color, x, y, z, o = {}) {
+  let g = geo;
+  if (o.sx || o.sy || o.sz) g.scale(o.sx || 1, o.sy || 1, o.sz || 1);
+  if (o.rx) g.rotateX(o.rx);
+  if (o.ry) g.rotateY(o.ry);
+  if (o.rz) g.rotateZ(o.rz);
+  g.translate(x, y, z);
+  g = g.index ? g.toNonIndexed() : g;
+  plainUV(g); paint(g, color);
+  return g;
+}
+const cap = (r, len) => new THREE.CapsuleGeometry(r, len, 4, 10);
+const sph = (r) => new THREE.SphereGeometry(r, 14, 10);
+const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+
+function headGeo(rx, ry, rz, cy, cell, skinCol) {
+  const g = new THREE.SphereGeometry(1, 20, 16).toNonIndexed();
+  const pos = g.attributes.position, n = pos.count;
+  const uv = new Float32Array(n * 2), col = new Float32Array(n * 3);
+  const sc = C(skinCol), wc = C('#ffffff');
+  const cx = cell % N, cyy = Math.floor(cell / N);
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    if (z > 0.05) {
+      const u = Math.min(0.98, Math.max(0.02, 0.5 + x * 0.56)), v = Math.min(0.98, Math.max(0.02, 0.5 + y * 0.56));
+      uv[i * 2] = (cx + u) / N; uv[i * 2 + 1] = 1 - (cyy + 1 - v) / N;
+      col[i * 3] = wc.r; col[i * 3 + 1] = wc.g; col[i * 3 + 2] = wc.b;
+    } else {
+      uv[i * 2] = 0.1 / N; uv[i * 2 + 1] = 1 - 0.1 / N;
+      col[i * 3] = sc.r; col[i * 3 + 1] = sc.g; col[i * 3 + 2] = sc.b;
+    }
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.scale(rx, ry, rz); g.translate(0, cy, 0);
+  return g;
+}
+
 export function makePedGeoms(look) {
   const w = look.w || 1;
   const skin = FACE_SKIN[look.face] || C('#e8c0a0');
-  const sc = '#' + skin.getHexString(); // skin tone (linear->sRGB)
-  const TW = 0.46 * w, TD = 0.26 * Math.min(1.15, w);
-  const body = [];
-  // торс
-  body.push(boxG(TW, 0.62, TD, 0, 0.31, 0, look.shirt));
+  const sc = '#' + skin.getHexString();
+  const TW = 0.46 * w, TD = 0.27 * Math.min(1.12, w);
+  const sx = TW / 2 + 0.07;
+  const parts = [];
+  const add = (g, b) => parts.push({ g, b });
+  const rT = 0.15;
+  const sleeve = look.shirt;
+  add(prim(sph(0.16), look.pants, 0, 0.93, 0, { sx: (TW / 2 + 0.02) / 0.16, sy: 0.8, sz: (TD / 2 / 0.16) * 1.05 }), BONE.hips);
+  add(prim(cap(rT, 0.3), look.shirt, 0, 1.2, 0, { sx: TW / 2 / rT, sz: TD / 2 / rT }), BONE.spine);
+  add(prim(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8), sc, 0, 1.55, 0), BONE.spine);
   if (look.hoodie) {
-    // капюшон сзади, молния, шнурки, футболка внутри
-    body.push(boxG(TW * 0.8, 0.18, 0.14, 0, 0.66, -TD * 0.65, look.hoodColor || look.shirt));
-    body.push(boxG(TW * 0.62, 0.06, 0.12, 0, 0.68, -TD * 0.55, look.hoodColor ? '#3a4a30' : '#0e0e0e'));
-    body.push(boxG(0.03, 0.44, 0.01, 0, 0.3, TD / 2 + 0.005, '#151515'));
-    if (look.shirt2) body.push(boxG(TW * 0.35, 0.17, 0.02, 0, 0.5, TD / 2 + 0.006, look.shirt2));
-    body.push(boxG(0.025, 0.2, 0.02, -0.07, 0.42, TD / 2 + 0.01, '#111'));
-    body.push(boxG(0.025, 0.2, 0.02, 0.07, 0.42, TD / 2 + 0.01, '#111'));
-  } else if (look.shirt2 && look.gang !== 'rus') {
-    body.push(boxG(TW * 0.4, 0.18, 0.02, 0, 0.5, TD / 2 + 0.005, look.shirt2));
+    add(prim(sph(0.13), look.hoodColor || look.shirt, 0, 1.55, -0.1, { sx: (TW / 2 / 0.13) * 0.85, sy: 0.7, sz: 0.9 }), BONE.spine);
+    add(prim(sph(0.11), look.hoodColor ? '#3a4a30' : '#0e0e0e', 0, 1.56, -0.08, { sx: 1.1, sy: 0.6, sz: 0.8 }), BONE.spine);
+    add(prim(box(0.03, 0.44, 0.012), '#151515', 0, 1.2, (TD / 2) * 0.98 + 0.008), BONE.spine);
+    if (look.shirt2) add(prim(box(TW * 0.34, 0.2, 0.012), look.shirt2, 0, 1.36, (TD / 2) * 0.95 + 0.01), BONE.spine);
+    add(prim(cap(0.012, 0.14), '#111', -0.07, 1.34, (TD / 2) * 0.95 + 0.02), BONE.spine);
+    add(prim(cap(0.012, 0.14), '#111', 0.07, 1.34, (TD / 2) * 0.95 + 0.02), BONE.spine);
+  } else if (look.shirt2 && look.gang !== 'rus') add(prim(box(TW * 0.36, 0.14, 0.012), look.shirt2, 0, 1.4, (TD / 2) * 0.95 + 0.01), BONE.spine);
+  if (look.gang === 'rus') {
+    add(prim(box(0.1, 0.38, 0.012), look.shirt2, 0, 1.24, (TD / 2) * 0.98 + 0.008), BONE.spine);
+    add(prim(box(TW * 0.2, 0.32, 0.014), '#7a0a20', -TW * 0.26, 1.3, (TD / 2) * 0.92 + 0.01, { rz: 0.35 }), BONE.spine);
+    add(prim(box(TW * 0.2, 0.32, 0.014), '#7a0a20', TW * 0.26, 1.3, (TD / 2) * 0.92 + 0.01, { rz: -0.35 }), BONE.spine);
   }
-  if (look.gang === 'rus') { body.push(boxG(0.1, 0.4, 0.03, 0, 0.36, TD / 2 + 0.005, look.shirt2)); body.push(boxG(TW * 0.18, 0.3, 0.02, -TW * 0.28, 0.42, TD / 2 + 0.01, '#7a0a20')); body.push(boxG(TW * 0.18, 0.3, 0.02, TW * 0.28, 0.42, TD / 2 + 0.01, '#7a0a20')); }
-  if (look.chain) body.push(boxG(0.16, 0.05, 0.03, 0, 0.6, TD / 2 + 0.02, '#e0b020'));
-  if (look.stripes) body.push(boxG(0.03, 0.6, 0.02, TW / 2 - 0.06, 0.3, TD / 2 + 0.004, look.stripes), boxG(0.03, 0.6, 0.02, -TW / 2 + 0.06, 0.3, TD / 2 + 0.004, look.stripes));
-  if (look.studs) body.push(boxG(TW * 1.02, 0.04, TD * 1.02, 0, 0.55, 0, '#a0a0a0'), boxG(0.06, 0.4, 0.02, 0.12, 0.36, TD / 2 + 0.006, '#b0b0b0'));
-  if (look.vest) body.push(boxG(TW * 1.06, 0.5, TD * 1.25, 0, 0.36, 0, '#1a1e18'));
-  if (look.gang === 'cop' && !look.vest) body.push(boxG(0.03, 0.44, 0.01, 0, 0.3, TD / 2 + 0.005, '#222'), boxG(0.12, 0.04, 0.02, 0.1, 0.5, TD / 2 + 0.006, '#d0c040'));
-  // шея + голова (лицо на +Z)
-  body.push(boxG(0.1, 0.06, 0.1, 0, 0.65, 0, sc));
-  const hw = look.face === FACE.valera ? 0.27 : 0.24;
-  body.push(boxG(hw, 0.26, 0.24, 0, 0.8, 0, sc, { front: look.face, frontColor: '#ffffff' }));
-  const hy = 0.8;
-  // причёски и головные уборы
+  if (look.chain) add(prim(new THREE.TorusGeometry(0.075, 0.014, 6, 14), '#e0b020', 0, 1.5, 0.05, { rx: Math.PI / 2 - 0.5 }), BONE.spine);
+  if (look.stripes) {
+    add(prim(box(0.02, 0.62, 0.012), look.stripes, (TW / 2) * 0.62, 1.2, (TD / 2) * 0.95), BONE.spine);
+    add(prim(box(0.02, 0.62, 0.012), look.stripes, (-TW / 2) * 0.62, 1.2, (TD / 2) * 0.95), BONE.spine);
+  }
+  if (look.studs) {
+    add(prim(box(TW * 1.03, 0.035, TD * 1.05), '#a0a0a0', 0, 1.4, 0), BONE.spine);
+    for (const s of [-1, 1]) for (let k = 0; k < 3; k++) add(prim(new THREE.ConeGeometry(0.02, 0.07, 5), '#b8b8b8', s * (sx - 0.02), 1.54, -0.03 + k * 0.05, { rz: -s * 0.3 }), BONE.spine);
+  }
+  if (look.vest) add(prim(cap(rT * 1.12, 0.26), '#1a1e18', 0, 1.2, 0.005, { sx: (TW / 2 / rT) * 1.06, sz: (TD / 2 / rT) * 1.2 }), BONE.spine);
+  if (look.gang === 'cop' && !look.vest) {
+    add(prim(box(0.03, 0.44, 0.012), '#222', 0, 1.2, (TD / 2) * 0.98 + 0.008), BONE.spine);
+    add(prim(box(0.1, 0.04, 0.012), '#d0c040', 0.1, 1.4, (TD / 2) * 0.95 + 0.01), BONE.spine);
+    add(prim(box(TW * 1.02, 0.04, TD * 1.05), '#1a1a1a', 0, 0.98, 0), BONE.spine);
+  }
+  // голова
+  const hw = look.face === FACE.valera ? 0.14 : 0.125;
+  const hcy = 1.52 + 0.14;
+  add(headGeo(hw, 0.148, hw * 1.03, hcy, look.face, sc), BONE.head);
+  add(prim(sph(0.02), sc, -hw * 0.98, hcy - 0.01, 0, { sy: 1.4, sz: 0.6 }), BONE.head);
+  add(prim(sph(0.02), sc, hw * 0.98, hcy - 0.01, 0, { sy: 1.4, sz: 0.6 }), BONE.head);
   const hs = look.hairStyle, hc = look.hair;
+  const hairCap = (r, tl, dz = -0.01, colr = hc, sy = 1.1) => prim(new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, tl), colr, 0, hcy, dz, { sx: (hw / r) * 1.05, sy: (0.148 / r) * sy, sz: (hw * 1.03 / r) * 1.06 });
   if (hs === 'valera') {
-    body.push(boxG(hw + 0.03, 0.08, 0.27, 0, hy + 0.14, -0.005, hc));
-    body.push(boxG(0.03, 0.2, 0.25, hw / 2 + 0.008, hy + 0.05, -0.01, hc), boxG(0.03, 0.2, 0.25, -hw / 2 - 0.008, hy + 0.05, -0.01, hc));
-    body.push(boxG(hw + 0.02, 0.24, 0.05, 0, hy + 0.02, -0.13, hc));
-    body.push(boxG(hw, 0.05, 0.03, 0, hy + 0.1, 0.125, hc, { frontColor: hc }));
-  } else if (hs === 'short') {
-    body.push(boxG(hw + 0.02, 0.07, 0.26, 0, hy + 0.135, -0.005, hc), boxG(hw + 0.02, 0.14, 0.05, 0, hy + 0.05, -0.125, hc));
-  } else if (hs === 'long') {
-    body.push(boxG(hw + 0.03, 0.08, 0.27, 0, hy + 0.135, 0, hc), boxG(hw + 0.03, 0.34, 0.05, 0, hy - 0.03, -0.13, hc), boxG(0.03, 0.26, 0.2, hw / 2 + 0.012, hy - 0.02, -0.02, hc), boxG(0.03, 0.26, 0.2, -hw / 2 - 0.012, hy - 0.02, -0.02, hc));
-  } else if (hs === 'mohawk') {
-    body.push(boxG(0.05, 0.16, 0.26, 0, hy + 0.19, -0.01, hc));
-  } else if (hs === 'emo') {
-    body.push(boxG(hw + 0.03, 0.09, 0.27, 0, hy + 0.14, 0, hc), boxG(hw + 0.02, 0.2, 0.05, 0, hy + 0.02, -0.13, hc), boxG(0.03, 0.16, 0.22, -hw / 2 - 0.01, hy + 0.03, 0, hc), boxG(0.03, 0.16, 0.22, hw / 2 + 0.01, hy + 0.03, 0, hc), boxG(0.12, 0.02, 0.02, -0.03, hy + 0.14, 0.13, '#d0308a'));
-  } else if (hs === 'hood') {
-    body.push(boxG(hw + 0.06, 0.3, 0.3, 0, hy + 0.02, -0.02, look.hoodColor || look.shirt));
-    body.push(boxG(hw - 0.02, 0.24, 0.02, 0, hy, 0.13, '#101010', { front: null }));
+    add(hairCap(1, Math.PI * 0.58, -0.012), BONE.head);
+    add(prim(box(hw * 2.02, 0.2, 0.07), hc, 0, hcy - 0.04, -hw * 0.9), BONE.head);
+    add(prim(box(0.035, 0.16, 0.17), hc, hw * 0.98, hcy + 0.02, -0.02), BONE.head);
+    add(prim(box(0.035, 0.16, 0.17), hc, -hw * 0.98, hcy + 0.02, -0.02), BONE.head);
+  } else if (hs === 'short') add(hairCap(1, Math.PI * 0.5, -0.02), BONE.head);
+  else if (hs === 'long') {
+    add(hairCap(1, Math.PI * 0.55), BONE.head);
+    add(prim(box(hw * 2.1, 0.36, 0.06), hc, 0, hcy - 0.1, -hw * 0.9), BONE.head);
+    add(prim(box(0.03, 0.3, 0.16), hc, hw * 0.98, hcy - 0.06, -0.02), BONE.head);
+    add(prim(box(0.03, 0.3, 0.16), hc, -hw * 0.98, hcy - 0.06, -0.02), BONE.head);
+  } else if (hs === 'mohawk') { for (let k = 0; k < 6; k++) add(prim(new THREE.ConeGeometry(0.025, 0.15 - Math.abs(k - 2.5) * 0.015, 5), hc, 0, hcy + 0.15, -0.11 + k * 0.045), BONE.head); }
+  else if (hs === 'emo') {
+    add(hairCap(1, Math.PI * 0.58), BONE.head);
+    add(prim(box(hw * 2.1, 0.22, 0.06), hc, 0, hcy - 0.03, -hw * 0.9), BONE.head);
+    add(prim(box(hw * 1.5, 0.09, 0.05), hc, -0.03, hcy + 0.085, hw * 0.85, { rz: 0.35 }), BONE.head);
+    add(prim(box(0.035, 0.18, 0.15), hc, -hw * 0.98, hcy - 0.02, 0.02), BONE.head);
+    add(prim(box(0.09, 0.02, 0.02), '#d0308a', 0.03, hcy + 0.1, hw * 0.98), BONE.head);
+  } else if (hs === 'hood') add(prim(new THREE.SphereGeometry(1, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.72), look.hoodColor || look.shirt, 0, hcy - 0.005, -0.015, { sx: hw * 1.2, sy: 0.17, sz: hw * 1.32 }), BONE.head);
+  if (look.hat === 'kepka') { add(hairCap(1.05, Math.PI * 0.45, 0, look.hatColor, 1.18), BONE.head); add(prim(box(hw * 1.8, 0.015, 0.11), look.hatColor, 0, hcy + 0.075, hw * 1.05, { rx: 0.15 }), BONE.head); }
+  if (look.hat === 'ushanka') { add(hairCap(1.14, Math.PI * 0.5, 0, look.hatColor, 1.25), BONE.head); add(prim(box(0.045, 0.14, 0.15), look.hatColor, hw * 1.05, hcy - 0.03, 0), BONE.head); add(prim(box(0.045, 0.14, 0.15), look.hatColor, -hw * 1.05, hcy - 0.03, 0), BONE.head); }
+  if (look.hat === 'furazhka') {
+    add(prim(new THREE.CylinderGeometry(hw * 1.32, hw * 1.15, 0.07, 14), look.hatColor, 0, hcy + 0.13, 0), BONE.head);
+    add(prim(new THREE.CylinderGeometry(hw * 1.1, hw * 1.1, 0.06, 14), '#c02020', 0, hcy + 0.085, 0), BONE.head);
+    add(prim(box(hw * 1.5, 0.012, 0.09), '#111', 0, hcy + 0.075, hw * 1.05), BONE.head);
   }
-  if (look.hat === 'kepka') body.push(boxG(hw + 0.03, 0.06, 0.26, 0, hy + 0.15, 0, look.hatColor), boxG(hw + 0.02, 0.02, 0.1, 0, hy + 0.13, 0.17, look.hatColor));
-  if (look.hat === 'ushanka') body.push(boxG(hw + 0.05, 0.1, 0.3, 0, hy + 0.15, 0, look.hatColor), boxG(0.04, 0.16, 0.16, hw / 2 + 0.02, hy + 0.03, 0, look.hatColor), boxG(0.04, 0.16, 0.16, -hw / 2 - 0.02, hy + 0.03, 0, look.hatColor));
-  if (look.hat === 'furazhka') body.push(boxG(hw + 0.07, 0.11, 0.3, 0, hy + 0.17, 0, look.hatColor), boxG(hw + 0.02, 0.02, 0.1, 0, hy + 0.12, 0.17, '#111'), boxG(hw + 0.075, 0.03, 0.305, 0, hy + 0.13, 0, '#c02020'));
-  if (look.hat === 'helmet') body.push(boxG(hw + 0.06, 0.16, 0.3, 0, hy + 0.12, 0, look.hatColor));
-  // руки: в каждой — плечо+предплечье+кисть
-  const mkArm = () => {
-    const a = [];
-    const sleeve = look.hoodie || look.gang === 'cop' || look.gang === 'gop' || look.gang === 'rus' || look.gang === 'punk' || look.hairStyle === 'long' || true;
-    a.push(boxG(0.12, 0.6, 0.13, 0, -0.27, 0, look.shirt));
-    if (look.stripes) a.push(boxG(0.13, 0.58, 0.03, 0, -0.27, 0.06, look.stripes));
-    a.push(boxG(0.09, 0.1, 0.09, 0, -0.62, 0, sc));
-    void sleeve;
-    return merge(a);
+  if (look.hat === 'helmet') add(hairCap(1.15, Math.PI * 0.6, 0, look.hatColor, 1.2), BONE.head);
+  // руки
+  const mkArm = (s, bs, be) => {
+    add(prim(sph(0.068), sleeve, s * sx, 1.46, 0), bs);
+    add(prim(cap(0.055, 0.17), sleeve, s * sx, 1.3, 0), bs);
+    add(prim(cap(0.047, 0.16), sleeve, s * sx, 1.0, 0), be);
+    add(prim(sph(0.05), sc, s * sx, 0.83, 0.01), be);
+    if (look.stripes) add(prim(box(0.012, 0.42, 0.04), look.stripes, s * (sx + 0.055), 1.26, 0), bs);
   };
-  const mkLeg = () => {
-    const l = [];
-    l.push(boxG(0.17, 0.78, 0.19, 0, -0.39, 0, look.pants));
-    if (look.stripes) l.push(boxG(0.02, 0.76, 0.2, 0.09, -0.39, 0, look.stripes));
-    l.push(boxG(0.17, 0.1, 0.3, 0, -0.84, 0.05, look.shoes));
-    return merge(l);
+  mkArm(-1, BONE.shL, BONE.elL);
+  mkArm(1, BONE.shR, BONE.elR);
+  // ноги
+  const mkLeg = (s, bt, bk) => {
+    add(prim(cap(0.085, 0.27), look.pants, s * 0.1, 0.68, 0), bt);
+    add(prim(cap(0.064, 0.26), look.pants, s * 0.1, 0.25, 0), bk);
+    add(prim(sph(0.075), look.shoes, s * 0.1, 0.055, 0.05, { sx: 1, sy: 0.7, sz: 1.9 }), bk);
+    if (look.stripes) add(prim(box(0.012, 0.7, 0.05), look.stripes, s * 0.19, 0.5, 0), bt);
   };
-  return { body: merge(body), arm: mkArm(), leg: mkLeg(), tw: TW };
+  mkLeg(-1, BONE.thL, BONE.knL);
+  mkLeg(1, BONE.thR, BONE.knR);
+  const bustList = [], skinList = [];
+  for (const { g, b } of parts) {
+    if (b === BONE.spine || b === BONE.head) bustList.push(g.clone());
+    const n = g.attributes.position.count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { si[i * 4] = b; sw[i * 4] = 1; }
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+    skinList.push(g);
+  }
+  const bust = merge(bustList);
+  bust.translate(0, -0.9, 0);
+  return { skin: merge(skinList), bust, tw: TW, sx };
 }
 
 // ---------- оружие в руке ----------
@@ -181,31 +268,38 @@ export function weaponMesh(id) {
   return m.clone();
 }
 
-// ---------- скелет персонажа ----------
+// ---------- скелет персонажа (кости, колени и локти) ----------
+function makeBones(sx) {
+  const mk = (x, y, z) => { const b = new THREE.Bone(); b.position.set(x, y, z); return b; };
+  const hips = mk(0, 0.9, 0), spine = mk(0, 0, 0), head = mk(0, 0.62, 0);
+  const shL = mk(-sx, 0.56, 0), elL = mk(0, -0.3, 0), shR = mk(sx, 0.56, 0), elR = mk(0, -0.3, 0);
+  const thL = mk(-0.1, 0, 0), knL = mk(0, -0.44, 0), thR = mk(0.1, 0, 0), knR = mk(0, -0.44, 0);
+  hips.add(spine, thL, thR); spine.add(head, shL, shR); shL.add(elL); shR.add(elR); thL.add(knL); thR.add(knR);
+  return [hips, spine, head, shL, elL, shR, elR, thL, knL, thR, knR];
+}
 export class Rig {
   constructor(look, opts = {}) {
     this.look = look;
     const geo = opts.geoms || makePedGeoms(look);
-    const mat = pedMaterial();
     this.root = new THREE.Group();
-    this.hips = new THREE.Group(); this.hips.position.y = 0.88; this.root.add(this.hips);
-    this.upper = new THREE.Group(); this.hips.add(this.upper);
-    this.body = new THREE.Mesh(geo.body, mat); this.upper.add(this.body);
-    this.armL = new THREE.Mesh(geo.arm, mat); this.armR = new THREE.Mesh(geo.arm, mat);
-    this.armL.position.set(-(geo.tw / 2 + 0.07), 0.58, 0); this.armR.position.set(geo.tw / 2 + 0.07, 0.58, 0);
-    this.upper.add(this.armL, this.armR);
-    this.legL = new THREE.Mesh(geo.leg, mat); this.legR = new THREE.Mesh(geo.leg, mat);
-    this.legL.position.set(-0.1, 0, 0); this.legR.position.set(0.1, 0, 0);
-    this.hips.add(this.legL, this.legR);
-    this.hand = new THREE.Group(); this.hand.position.set(0, -0.62, 0.02); this.hand.rotation.x = Math.PI / 2; this.armR.add(this.hand);
+    this.bones = makeBones(geo.sx);
+    this.body = new THREE.SkinnedMesh(geo.skin, pedMaterial());
+    this.body.add(this.bones[0]);
+    this.body.updateMatrixWorld(true);
+    this.body.bind(new THREE.Skeleton(this.bones));
+    this.body.frustumCulled = false;
+    this.root.add(this.body);
+    const b = this.bones;
+    this.hips = b[0]; this.upper = b[1]; this.headB = b[2]; this.armL = b[3]; this.elL = b[4]; this.armR = b[5]; this.elR = b[6];
+    this.legL = b[7]; this.knL = b[8]; this.legR = b[9]; this.knR = b[10];
+    this.hand = new THREE.Group(); this.hand.position.set(0, -0.3, 0.02); this.hand.rotation.x = Math.PI / 2; this.elR.add(this.hand);
     this.weaponId = null; this.weapon = null;
     this.phase = Math.random() * 6; this.swing = 0;
     this.st = { speed: 0, crouch: 0, aim: 0, punch: 0, dead: 0, sit: 0, bike: 0, twohand: false, melee: false, hunch: look.hunch || 0, squat: 0 };
     this.root.scale.setScalar(look.scale || 1);
-    this.root.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = true; } });
     this.setShadow(!!opts.shadow);
   }
-  setShadow(v) { this.body.castShadow = this.armL.castShadow = this.armR.castShadow = this.legL.castShadow = this.legR.castShadow = v; }
+  setShadow(v) { this.body.castShadow = v; }
   setWeapon(id) {
     if (this.weaponId === id) return;
     if (this.weapon) { this.hand.remove(this.weapon); this.weapon = null; }
@@ -213,47 +307,46 @@ export class Rig {
     const m = id && id !== 'fist' ? weaponMesh(id) : null;
     if (m) { this.hand.add(m); this.weapon = m; }
   }
-  // st: speed(м/с), crouch 0..1, aim 0..1, punch 0..1 (фаза удара), dead 0..1, sit 0..1
   update(dt, st) {
     const s = this.st; Object.assign(s, st);
     const sp = s.speed;
     this.phase += dt * (2 + sp * 1.5) * (s.bike ? 0.5 : 1);
-    const amp = clamp(sp / 3.5, 0, 1) * (sp > 5 ? 1.1 : 0.85);
-    let sw = Math.sin(this.phase * 2.2) * amp;
-    this.swing = damp(this.swing, sw, 30, dt); sw = this.swing;
+    const amp = clamp(sp / 3.5, 0, 1) * (sp > 5 ? 1.15 : 0.8);
+    const ph = this.phase * 2.2;
+    const sw = Math.sin(ph) * amp;
+    const kb = 0.35 + amp * 0.9;
+    let thL = sw, thR = -sw;
+    let knL = amp * kb * Math.max(0, -Math.cos(ph)) + 0.05, knR = amp * kb * Math.max(0, Math.cos(ph)) + 0.05;
     const crouch = s.crouch, sit = s.sit, squat = s.squat;
-    // ноги
-    let ll = sw, lr = -sw;
-    if (sit > 0) { ll = lerp(ll, -1.45, sit); lr = lerp(lr, -1.45, sit); }
-    if (s.bike) { const p = Math.sin(this.phase * 3) * 0.7; ll = -0.8 + p; lr = -0.8 - p; }
-    if (squat > 0) { ll = lerp(ll, -1.2, squat); lr = lerp(lr, -1.2, squat); }
-    this.legL.rotation.x = ll; this.legR.rotation.x = lr;
-    const lowered = Math.max(crouch * 0.34, sit * 0.36, squat * 0.42);
-    this.hips.position.y = 0.88 - lowered;
-    const ls = 1 - lowered / 0.88 * (sit > 0 || squat > 0 ? 0.4 : 1.0);
-    this.legL.scale.y = this.legR.scale.y = clamp(ls, 0.5, 1);
+    let drop = crouch * 0.36;
+    if (crouch > 0) { thL = lerp(thL, -1.0, crouch); thR = lerp(thR, -1.0, crouch); knL = lerp(knL, 1.7, crouch); knR = lerp(knR, 1.7, crouch); }
+    if (sit > 0) { thL = lerp(thL, -1.5, sit); thR = lerp(thR, -1.5, sit); knL = lerp(knL, 1.5, sit); knR = lerp(knR, 1.5, sit); drop = Math.max(drop, sit * 0.36); }
+    if (squat > 0) { thL = lerp(thL, -1.9, squat); thR = lerp(thR, -1.9, squat); knL = lerp(knL, 2.4, squat); knR = lerp(knR, 2.4, squat); drop = Math.max(drop, squat * 0.5); }
+    if (s.bike) { const p = Math.sin(this.phase * 3) * 0.6; thL = -1.0 + p; thR = -1.0 - p; knL = 1.2 - p; knR = 1.2 + p; drop = 0.08; }
+    this.legL.rotation.x = thL; this.legR.rotation.x = thR; this.knL.rotation.x = knL; this.knR.rotation.x = knR;
+    this.hips.position.y = 0.9 - drop;
     // корпус
-    const lean = clamp(sp * 0.03, 0, 0.22) + crouch * 0.18 + (s.bike ? 0.35 : 0) + s.hunch * 0.22 + squat * 0.25;
+    const lean = clamp(sp * 0.03, 0, 0.22) + crouch * 0.2 + (s.bike ? 0.4 : 0) + s.hunch * 0.22 + squat * 0.25;
     this.upper.rotation.x = lean;
-    this.upper.rotation.y = -sw * 0.15 * (s.aim > 0.3 ? 0 : 1);
+    this.upper.rotation.y = -sw * 0.18 * (s.aim > 0.3 ? 0 : 1);
     // руки
     let al = -sw * 0.9, ar = sw * 0.9;
-    if (s.bike || sit > 0) { al = ar = lerp(al, -0.95, Math.max(s.bike ? 1 : 0, sit)); }
-    let arZ = 0, alZ = 0, alY = 0;
+    let ell = -0.25 - amp * 0.45, elr = -0.25 - amp * 0.45;
+    if (s.bike || sit > 0) { const k = Math.max(s.bike ? 1 : 0, sit); al = lerp(al, -1.0, k); ar = lerp(ar, -1.0, k); ell = lerp(ell, -0.35, k); elr = lerp(elr, -0.35, k); }
+    let arZ = 0, alY = 0;
     if (s.aim > 0) {
-      ar = lerp(ar, -1.5, s.aim);
-      if (s.twohand) { al = lerp(al, -1.4, s.aim); alY = lerp(0, 0.5, s.aim); }
-      else al = lerp(al, -sw * 0.3, s.aim);
-      this.upper.rotation.y = lerp(this.upper.rotation.y, -0.35, s.aim);
+      ar = lerp(ar, -1.5, s.aim); elr = lerp(elr, -0.05, s.aim);
+      if (s.twohand) { al = lerp(al, -1.3, s.aim); alY = lerp(0, 0.55, s.aim); ell = lerp(ell, -0.55, s.aim); }
+      this.upper.rotation.y = lerp(this.upper.rotation.y, -0.3, s.aim);
     }
     if (s.punch > 0) {
       const p = Math.sin(clamp(s.punch, 0, 1) * Math.PI);
-      if (s.melee) { ar = lerp(ar, -2.3 + s.punch * 2.6, Math.min(1, p * 1.4)); arZ = p * 0.6; this.upper.rotation.y += p * 0.6; }
-      else { ar = lerp(ar, -1.55, p); this.upper.rotation.y += p * 0.5; al = lerp(al, -0.5, p); }
+      if (s.melee) { ar = lerp(ar, -2.3 + s.punch * 2.6, Math.min(1, p * 1.4)); arZ = p * 0.5; this.upper.rotation.y += p * 0.6; elr = -0.3; }
+      else { ar = lerp(ar, -1.5, p); elr = lerp(elr, -0.1, p); this.upper.rotation.y += p * 0.5; al = lerp(al, -0.6, p); ell = lerp(ell, -1.6, p); }
     }
     if (s.dead > 0) { ar = lerp(ar, -1.2, s.dead); al = lerp(al, 0.6, s.dead); }
-    this.armL.rotation.set(al, alY, alZ); this.armR.rotation.set(ar, 0, arZ);
-    // падение
+    this.armL.rotation.set(al, alY, 0); this.armR.rotation.set(ar, 0, arZ);
+    this.elL.rotation.x = ell; this.elR.rotation.x = elr;
     const d = s.dead;
     this.root.rotation.x = -d * 1.52;
     this.root.position.y = d * 0.14;
@@ -263,8 +356,9 @@ export class Rig {
 // ---------- транспорт ----------
 function shapeFromPts(pts) { const s = new THREE.Shape(); pts.forEach(([x, y], i) => (i ? s.lineTo(x, y) : s.moveTo(x, y))); s.closePath(); return s; }
 function extrudeProfile(pts, width, color, len) {
-  const g = new THREE.ExtrudeGeometry(shapeFromPts(pts), { depth: width, bevelEnabled: false, steps: 1, curveSegments: 1 });
-  g.translate(0, 0, -width / 2);
+  const dep = Math.max(0.1, width - 0.1);
+  const g = new THREE.ExtrudeGeometry(shapeFromPts(pts), { depth: dep, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelOffset: -0.02, bevelSegments: 2, steps: 1, curveSegments: 1 });
+  g.translate(0, 0, -dep / 2);
   g.rotateY(-Math.PI / 2); // длина по +Z
   g.translate(0, 0, -len / 2);
   return colorize(g.toNonIndexed(), color);
@@ -281,7 +375,7 @@ function vbox(w, h, d, x, y, z, color) { return colorize(new THREE.BoxGeometry(w
 function cylX(r, len, x, y, z, color, seg = 14) { return colorize(new THREE.CylinderGeometry(r, r, len, seg).rotateZ(Math.PI / 2).translate(x, y, z).toNonIndexed(), color); }
 
 let vMat = null;
-function vehMat() { return vMat || (vMat = new THREE.MeshLambertMaterial({ vertexColors: true })); }
+function vehMat() { return vMat || (G.vehMat = vMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.4, envMap: G.envMap || null, envMapIntensity: 0.9 })); }
 
 function lightMats() {
   return {

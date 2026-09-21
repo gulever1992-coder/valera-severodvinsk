@@ -63,7 +63,7 @@ export const Veh = {
     if (!v.driverMesh) {
       const lk = look || pedLook(v.spec.police ? 'cop' : v.spec.taxi || v.spec.kind === 'bus' ? 'default' : chance(0.2) ? 'woman' : 'default');
       const g = makePedGeoms(lk);
-      const mesh = new THREE.Mesh(g.body, pedMaterial());
+      const mesh = new THREE.Mesh(g.bust, pedMaterial());
       const seatY = v.spec.kind === 'bus' ? 1.0 : 0.42;
       mesh.position.set(v.spec.kind === 'bus' ? 0.5 : v.W * 0.22, seatY, v.spec.kind === 'bus' ? v.L * 0.42 : v.L * 0.04);
       mesh.scale.setScalar(0.9);
