@@ -157,7 +157,23 @@ function faceAtlas() {
     const ox = (i % N) * S, oy = Math.floor(i / N) * S;
     FACE_SKIN[i] = new THREE.Color(f.skin);
     x.fillStyle = f.skin; x.fillRect(ox, oy, S, S);
-    if (i === 0) return;
+    if (i === 0) {
+      // нейтральная «ткань»: слабый шум и мягкое затемнение к краям — даёт объём одежде и коже без лишнего цвета
+      for (let yy = 0; yy < S; yy++) for (let xx = 0; xx < S; xx += 2) {
+        const n = (Math.sin(xx * 12.9898 + yy * 78.233) * 43758.5453) % 1;
+        const v = 0.5 + (n - Math.floor(n) - 0.5) * 0.16;
+        x.fillStyle = `rgba(255,255,255,${v > 0.5 ? (v - 0.5) * 0.5 : 0})`;
+        x.fillRect(ox + xx, oy + yy, 2, 1);
+        x.fillStyle = `rgba(0,0,0,${v < 0.5 ? (0.5 - v) * 0.55 : 0})`;
+        x.fillRect(ox + xx, oy + yy, 2, 1);
+      }
+      x.strokeStyle = 'rgba(0,0,0,.10)'; x.lineWidth = 1;
+      for (let d = -S; d < S; d += 5) { x.beginPath(); x.moveTo(ox + d, oy); x.lineTo(ox + d + S, oy + S); x.stroke(); }
+      const g = x.createRadialGradient(ox + S / 2, oy + S / 2, S * 0.15, ox + S / 2, oy + S / 2, S * 0.72);
+      g.addColorStop(0, 'rgba(255,255,255,.10)'); g.addColorStop(1, 'rgba(0,0,0,.22)');
+      x.fillStyle = g; x.fillRect(ox, oy, S, S);
+      return;
+    }
     const ex = [42, 86], ey = 60;
     // тени/румянец
     x.fillStyle = 'rgba(190,110,90,.14)'; x.beginPath(); x.arc(ox + 30, oy + 82, 14, 0, 7); x.arc(ox + 98, oy + 82, 14, 0, 7); x.fill();
@@ -232,6 +248,22 @@ export function makePlate() {
   return tex(c, { repeat: false });
 }
 
+function carPaint() {
+  const S = 256;
+  const [c, x] = cv(S, S);
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, S, S);
+  // вертикальное АО: тёмный низ (пороги/тень), светлая середина (борт), лёгкое затемнение крыши
+  const g = x.createLinearGradient(0, 0, 0, S);
+  g.addColorStop(0, 'rgba(0,0,0,.16)'); g.addColorStop(0.28, 'rgba(255,255,255,.10)'); g.addColorStop(0.55, 'rgba(255,255,255,.02)'); g.addColorStop(0.82, 'rgba(0,0,0,.05)'); g.addColorStop(1, 'rgba(0,0,0,.4)');
+  x.fillStyle = g; x.fillRect(0, 0, S, S);
+  // диагональный блик (как отражение неба на лаке)
+  const g2 = x.createLinearGradient(0, S, S, 0);
+  g2.addColorStop(0.35, 'rgba(255,255,255,0)'); g2.addColorStop(0.48, 'rgba(255,255,255,.22)'); g2.addColorStop(0.58, 'rgba(255,255,255,0)');
+  x.fillStyle = g2; x.fillRect(0, 0, S, S);
+  noise(x, S, S, 8);
+  return tex(c, { aniso: 4 });
+}
+
 let cache = null;
 export function createTextures() {
   if (cache) return cache;
@@ -239,7 +271,7 @@ export function createTextures() {
   cache = {
     roadLane: asphalt('lane'), roadStreet: asphalt('street'), roadMajor: asphalt('major'),
     sidewalk: sidewalk(), grass: grass(), dirt: dirt(), water: water(),
-    facade: f.color, facadeMask: f.mask, glow: glow(), cloud: cloud(), smoke: smoke(), faces: faceAtlas(),
+    facade: f.color, facadeMask: f.mask, glow: glow(), cloud: cloud(), smoke: smoke(), faces: faceAtlas(), carPaint: carPaint(),
   };
   return cache;
 }

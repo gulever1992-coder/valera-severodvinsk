@@ -88,8 +88,14 @@ export function pedLook(type) {
 // ---------- скелетные персонажи (скруглённые формы, один SkinnedMesh на человека) ----------
 const BONE = { hips: 0, spine: 1, head: 2, shL: 3, elL: 4, shR: 5, elR: 6, thL: 7, knL: 8, thR: 9, knR: 10 };
 function plainUV(g) {
+  // разворачиваем в маленький (но не точечный) кусочек нейтральной «тканевой» ячейки 0 —
+  // так у капсул/сфер появляется лёгкий объём и зерно вместо абсолютно плоского цвета
+  const src = g.attributes.uv;
   const n = g.attributes.position.count, uv = new Float32Array(n * 2);
-  for (let i = 0; i < n; i++) { uv[i * 2] = 0.1 / N; uv[i * 2 + 1] = 1 - 0.1 / N; }
+  for (let i = 0; i < n; i++) {
+    const u = src ? src.getX(i) : 0.5, v = src ? src.getY(i) : 0.5;
+    uv[i * 2] = (0.06 + 0.2 * u) / N; uv[i * 2 + 1] = 1 - (0.06 + 0.2 * (1 - v)) / N;
+  }
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
 }
 function paint(g, color) {
@@ -375,7 +381,7 @@ function vbox(w, h, d, x, y, z, color) { return colorize(new THREE.BoxGeometry(w
 function cylX(r, len, x, y, z, color, seg = 14) { return colorize(new THREE.CylinderGeometry(r, r, len, seg).rotateZ(Math.PI / 2).translate(x, y, z).toNonIndexed(), color); }
 
 let vMat = null;
-function vehMat() { return vMat || (G.vehMat = vMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.4, envMap: G.envMap || null, envMapIntensity: 0.9 })); }
+function vehMat() { return vMat || (G.vehMat = vMat = new THREE.MeshStandardMaterial({ map: G.tex.carPaint, vertexColors: true, roughness: 0.38, metalness: 0.45, envMap: G.envMap || null, envMapIntensity: 0.9 })); }
 
 function lightMats() {
   return {
